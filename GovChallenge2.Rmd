@@ -1,0 +1,223 @@
+---
+title: "Govenor's challenge 2"
+author: "Christian Lubin"
+date: "27/10/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#loading the data to cactulate stagflation
+GrowthRate_Inflation = read.csv("GrowthRate-Inflation.csv")
+
+#GDP and inflation data were collected and reported for the third quarter of 2021 but alot of the other variables were not.
+#As a result, i am dropping the last observation because the models will not have data to learn. The models will only be learning from 1990Q1 to 2021Q2.
+GrowthRate_Inflation = GrowthRate_Inflation[1:nrow(GrowthRate_Inflation)-1,]
+```
+
+#defining stagflation
+```{r}
+minGrowrthRate1Q = 0.012;#flag1: if growth rate over 1 quarter is "below" this value
+maxInflation = 2;# flag2: if the inflation is "above" this value
+```
+#Creating  Canadian Stagflation vector
+```{r}
+# is three because we want to train the model to see data in quarter x and predict stagflation in quarter x+3. This is because we have data until 2021Q2 and we want to to predict stagflation in 2022Q1 so 3 quarters later.
+numQuarters = 3;
+
+#creating a stagflation matrix. This is a matrix where for quarter x of a year, if there was stagflation in the quarter (x+numQuarters), then the value of the stagflation variable at quater x is 1.
+
+Stagflation = matrix(data = NA, nrow=nrow(GrowthRate_Inflation), ncol = 1)
+Stagflation <- data.frame(GrowthRate_Inflation[,1],Stagflation)                      
+
+for (i in 1:(nrow(Stagflation)-numQuarters)) {
+  #if the growth rare is below the given value and inflation is above the given value then stagflation is 1. Else 0
+  if ( GrowthRate_Inflation$GDP.Growth.rate.1.Quarter..CACL[i+numQuarters] < minGrowrthRate1Q  &
+       GrowthRate_Inflation[i+numQuarters,5] > maxInflation ) {
+    Stagflation[i,2]=1
+  }else{
+    Stagflation[i,2]=0
+  }
+}
+```
+
+```{r}
+#Strength of stagflation variable
+USGrowthRate_Inflation = read.csv("USGrowthRate-Inflation.csv")
+
+#creating US Stagflation variable
+USStagflation = matrix(data = NA, nrow=nrow(USGrowthRate_Inflation), ncol = 1)
+USStagflation <- data.frame(USGrowthRate_Inflation[,1],USStagflation)                      
+
+for (i in 1:(nrow(USStagflation)-numQuarters)) {
+  #if the growth rare is below the given value and inflation is above the given value then stagflation is 1. Else 0
+  if ( USGrowthRate_Inflation$USGDP.GrowthRate[i+numQuarters] < minGrowrthRate1Q  &
+       USGrowthRate_Inflation[i+numQuarters,3] > maxInflation ) {
+    USStagflation[i,2]=1
+  }else{
+    USStagflation[i,2]=0
+  }
+}
+
+#Creating strenght of stagflation variable
+strengthStagflation = matrix(data = NA, nrow = nrow(Stagflation))
+strengthStagflation <- data.frame(USGrowthRate_Inflation[,1],strengthStagflation)
+
+#If both CAN and US experienced stagflation, then strength is 2, else strength is whatever is in the canada stagflation variable
+for (i in 1:(nrow(Stagflation)-3)) {
+  if ( Stagflation[i,2]==1 & USStagflation[i,2] ==1 ) {
+    strengthStagflation[i,2] = 2
+  }else(
+    strengthStagflation[i,2]= Stagflation[i,2]
+  )
+}
+
+```
+
+```{r}
+#Length of stagflation variable
+lengthStagflation = matrix(data = NA, nrow = nrow(Stagflation))
+lengthStagflation <- data.frame(USGrowthRate_Inflation[,1],lengthStagflation)
+
+len = 0
+
+for (i in 1:(nrow(Stagflation)-3)) {
+  if (Stagflation[i,2]==1) {
+    len = len +1
+  }else{
+    len = 0
+  }
+  lengthStagflation[i,2]=len
+}
+
+```
+
+
+#Model Creation
+##Loading Data
+```{r}
+InterestRate <- read.csv("interestRate.csv");#checked
+LabourProductivity <- read.csv("LabourProductivity.csv");#checked
+CostOfLabour <- read.csv("CostOfLabour.csv");#checked
+Inflation = read.csv("Inflation.csv");#checked
+EnergyPrices = read.csv("EnergyPrices.csv");#checked
+
+```
+
+##Logit Models
+```{r}
+##provide cut off point
+cutOff = 0.5
+
+
+numModels = (ncol(InterestRate)-1)*(ncol(LabourProductivity)-1)*(ncol(CostOfLabour)-1)*(ncol(Inflation)-1)*(ncol(EnergyPrices)-1);
+
+LogitModels =  matrix(data = NA, nrow = numModels, ncol = 7)
+colnames(LogitModels) <- c("InterestRateMeasure","LabourProductivityMeasure","CostOfLabourMeasure","InflationMeasure", "EnergyPricesMeasure","AIC","Training Accuracy")
+currentRow = 1
+
+for (i in 2:ncol(InterestRate)) {
+  for (j in 2:ncol(LabourProductivity)) {
+    for (k in 2:ncol(CostOfLabour)) {
+      for (l in 2:ncol(Inflation)) {
+        for (m in 2:ncol(EnergyPrices)) {
+          glm.fits = glm(c(Stagflation[1:123,2])~
+                           c(InterestRate[1:123,i])+
+                           c(LabourProductivity[1:123,j])+
+                           c(CostOfLabour[1:123,k])+
+                           c(Inflation[1:123,l])+
+                           c(EnergyPrices[1:123,m]),
+                         family = binomial)
+          
+# Here i am predicting probabilities on the dataset that the model was trained on. So using the values of the predictors, i am predicting the probabilities of stagflation or not.If no data set is supplied to the predict() function, then the probabilities are computed for the training data that was used to fit the logistic regression model.
+          glm.probs=predict (glm.fits,type="response")
+# Here i am creating a vector where all values default to no stagflation or o.
+          glm.pred=rep(0 ,126)
+# Here i am going through my predicted stagflation values and setting it to 1 if the predicted probability of stagflation is greater than the given cutoff.
+          glm.pred[glm.probs >cutOff]=1
+          
+# Creating the classic 4 boxes, up top the actual classes, on the side the predicted classes and in each box, the appropriate number          
+          table = table(glm.pred,Stagflation[,2])
+#Calculating training accuracy this way because we are most interested in times where stagflation happened and wether or not the model predicted it.
+          trainingAccuracy = 0
+          try(
+            trainingAccuracy = table[2,2]/sum(na.omit(Stagflation[,2]))
+            )
+          
+#adding the relevant information into the lightmodels matrix.          
+          LogitModels[currentRow,] = c(colnames(InterestRate)[i],
+                              colnames(LabourProductivity)[j],
+                              colnames(CostOfLabour)[k],
+                              colnames(Inflation)[l],
+                              colnames(EnergyPrices)[m],
+                              glm.fits$aic,
+                              trainingAccuracy)
+          currentRow = currentRow +1
+        }
+      }
+    }
+  }
+}
+
+
+```
+
+```{r}
+##provide cut off point
+cutOff = 0.5
+
+#after running the previous chunk (removing some or non of the variables from the models) a few times i think we should use this model.
+
+interestRate <- InterestRate$Average.of.Bank.rate.v39078[1:123]
+labourProductivity <- LabourProductivity$Labour.productivity.v1409153[1:123]
+costOfLabour <- CostOfLabour$Unit.labour.cost.v1409159[1:123]
+inflation <- Inflation$Average.of.Measure.of.core.inflation.based.on.a.factor.model..CPI.common..year.over.year.percent.change..v108785713[1:123]
+energyPrices <- EnergyPrices$Average.of.Electricity[1:123]
+stagflation <- Stagflation$Stagflation[1:123]
+
+data <- data.frame(interestRate,
+                   labourProductivity,
+                   costOfLabour,
+                   inflation,
+                   energyPrices,
+                   stagflation)
+data$stagflation <- as.factor(data$stagflation)
+
+#This model seemed to be the best so i ran it and tried to get a prediction for stagflation.
+glm.fits = glm(stagflation~., data = data, family = binomial)
+
+```
+
+```{r}
+summary(glm.fits)
+
+glm.probs=predict (glm.fits,type= "response")
+glm.pred=rep(0 ,126)
+glm.pred[glm.probs >cutOff]=1
+table = table(glm.pred,Stagflation[,2])
+table
+
+```
+#Point prediction
+```{r}
+currentInterestRate <- InterestRate$Average.of.Bank.rate.v39078[nrow(InterestRate)]
+currentLabourProductivity <- LabourProductivity$Labour.productivity.v1409153[nrow(LabourProductivity)]
+currentCostOfLabour <- CostOfLabour$Unit.labour.cost.v1409159[nrow(CostOfLabour)]
+currentInflation <- Inflation$Average.of.Measure.of.core.inflation.based.on.a.factor.model..CPI.common..year.over.year.percent.change..v108785713[nrow(Inflation)]
+currentEnergyPrices <- EnergyPrices$Average.of.Electricity[nrow(EnergyPrices)]
+
+
+currentInterestRate = InterestRate$Average.of.Bank.rate.v39078[nrow(InterestRate)]
+
+currentLabourProductivity = LabourProductivity$Hours.worked.5[nrow(LabourProductivity)]
+currentOilPrices = EnergyPrices$Average.of.Western.Texas.Intermediate[nrow(EnergyPrices)]
+
+regression = -45.78317+0.98088*currentInterestRate+0.48853*currentLabourProductivity-0.15348*currentCostOfLabour+6.96384*currentInflation-0.07897*currentEnergyPrices
+
+pred = ( exp(regression) )/(1+ exp(regression))
+pred
+pred>cutOff
+```
